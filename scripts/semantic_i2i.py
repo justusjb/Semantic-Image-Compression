@@ -22,7 +22,6 @@ from tqdm import tqdm, trange
 from transformers import pipeline
 from scripts.qam import qam16ModulationTensor, qam16ModulationString
 import time
-import warnings
 
 from SSIM_PIL import compare_ssim
 
@@ -34,8 +33,6 @@ INIT DATASET AND DATALOADER
 capt_file_path  =  "path/to/captions.txt"          #"G:/Giordano/Flickr8kDataset/captions.txt"
 images_dir_path =  "path/to/Images"                #"G:/Giordano/Flickr8kDataset/Images/"
 batch_size      =  1
-
-warnings.filterwarnings("ignore", category=UserWarning)
 
 dataset = Only_images_Flickr8kDataset(images_dir_path)
 
