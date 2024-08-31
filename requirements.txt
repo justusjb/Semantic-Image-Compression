@@ -11,7 +11,7 @@ torchmetrics==0.6
 omegaconf==2.1.1
 test-tube>=0.7.5
 streamlit>=0.73.1
-einops==0.3.0
+einops
 transformers
 webdataset==0.2.5
 open-clip-torch==2.7.0
@@ -26,6 +26,3 @@ kaggle
 accelerate
 SSIM-PIL
 huggingface_hub
-
-
--e .
