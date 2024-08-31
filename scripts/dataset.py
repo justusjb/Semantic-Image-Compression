@@ -85,6 +85,9 @@ class Only_images_Flickr8kDataset(Dataset):
         self.images_dir_path=images_dir_path
         self.img_filenames_list=img_filenames_list
         self.length = len(img_filenames_list)
+        print(f"Images directory: {images_dir_path}")
+        print(f"Number of images found: {len(self.img_filenames_list)}")
+        print(f"First few image names: {self.img_filenames_list[:5]}")
 
     
     def __len__(self):
