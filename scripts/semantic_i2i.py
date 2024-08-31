@@ -17,7 +17,6 @@ from ldm.models.diffusion.ddim import DDIMSampler
 from tqdm import tqdm
 import lpips as lp
 from einops import rearrange, repeat
-import einops
 from torch import autocast
 from tqdm import tqdm, trange
 from transformers import pipeline
@@ -34,8 +33,6 @@ INIT DATASET AND DATALOADER
 capt_file_path  =  "path/to/captions.txt"          #"G:/Giordano/Flickr8kDataset/captions.txt"
 images_dir_path =  "path/to/Images"                #"G:/Giordano/Flickr8kDataset/Images/"
 batch_size      =  1
-
-einops.set_backend('torch')
 
 dataset = Only_images_Flickr8kDataset(images_dir_path)
 
