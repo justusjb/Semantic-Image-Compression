@@ -19,7 +19,7 @@ import lpips as lp
 from einops import rearrange, repeat
 from torch import autocast
 from tqdm import tqdm, trange
-from transformers import pipeline
+from transformers import pipeline, logging
 from scripts.qam import qam16ModulationTensor, qam16ModulationString
 import time
 
@@ -99,7 +99,10 @@ def test(dataloader,
          device=None,
          strength=0.8,
          scale=9.0):
-    blip = pipeline("image-to-text", model="Salesforce/blip-image-captioning-large")
+
+    logging.set_verbosity_error()
+
+    blip = pipeline("image-to-text", model="Salesforce/blip-image-captioning-large", device=device)
     i = 0
 
     sample_path = os.path.join(outpath, f"Test-samples-{snr}")
@@ -125,7 +128,7 @@ def test(dataloader,
         init_image = init_image.resize((512, 512), resample=PIL.Image.LANCZOS)
 
         # Automatically extract caption using BLIP model
-        prompt = blip(init_image)[0]["generated_text"]
+        prompt = blip(init_image, max_new_tokens=50)[0]["generated_text"]
         prompt_original = prompt
 
         base_count = len(os.listdir(sample_path))

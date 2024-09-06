@@ -26,6 +26,8 @@ def qam16ModulationTensor(input_tensor,snr_db=10):
 
   message = input_tensor
 
+  message = message.detach().cpu()  # Ensure the tensor is on CPU
+
   #Convert tensor in bitstream
   bit_list = tensor2bin(message)
 
@@ -135,7 +137,8 @@ def float2bin(f):
 
 def tensor2bin(tensor):
 
-  tensor_flattened = tensor.view(-1).numpy()
+  #tensor_flattened = tensor.view(-1).numpy()
+  tensor_flattened = tensor.contiguous().view(-1).cpu().numpy()
 
   bit_list = []
   for number in tensor_flattened:
