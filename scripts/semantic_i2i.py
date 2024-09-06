@@ -52,10 +52,17 @@ config_path     = "path/to/model-config"     #"G:/Giordano/stablediffusion/confi
 
 
 def load_flux_model(model_path):
-    print(f"Loading FLUX model from not {model_path}")
-    pipeline = FluxPipeline.from_pretrained("black-forest-labs/FLUX.1-schnell", torch_dtype=torch.float16)
-    pipeline = pipeline.to("cuda")
-    return pipeline
+    print(f"Loading FLUX model from {model_path}")
+    try:
+        pipeline = FluxPipeline.from_pretrained(model_path, torch_dtype=torch.bfloat16)
+        pipeline.enable_model_cpu_offload()
+        return pipeline
+    except Exception as e:
+        print(f"Error loading FLUX model: {e}")
+        print("Attempting to load from 'black-forest-labs/FLUX.1-schnell'...")
+        pipeline = FluxPipeline.from_pretrained("black-forest-labs/FLUX.1-schnell", torch_dtype=torch.float16)
+        pipeline.enable_model_cpu_offload()
+        return pipeline
 
 
 def load_model_from_config(config, ckpt, verbose=False):
@@ -99,9 +106,6 @@ def test(dataloader,
          device=None,
          strength=0.8,
          scale=9.0):
-
-    logging.set_verbosity_error()
-
     blip = pipeline("image-to-text", model="Salesforce/blip-image-captioning-large", device=device)
     i = 0
 
@@ -128,14 +132,12 @@ def test(dataloader,
         init_image = init_image.resize((512, 512), resample=PIL.Image.LANCZOS)
 
         # Automatically extract caption using BLIP model
-        prompt = blip(init_image, max_new_tokens=50)[0]["generated_text"]
+        prompt = blip(init_image, max_new_tokens=20)[0]["generated_text"]
         prompt_original = prompt
 
         base_count = len(os.listdir(sample_path))
 
-        # Apply channel simulation
-        init_image_tensor = torch.from_numpy(np.array(init_image)).permute(2, 0, 1).unsqueeze(0).float() / 127.5 - 1
-        init_image_tensor = qam16ModulationTensor(init_image_tensor.cpu(), snr_db=snr).to(device)
+        # Apply channel simulation to the prompt
         prompt = qam16ModulationString(prompt, snr_db=snr)
 
         start_time = time.time()
@@ -143,10 +145,11 @@ def test(dataloader,
         # Generate image with FLUX
         with torch.no_grad():
             output = model(
-                prompt=prompt,
-                image=init_image_tensor,
-                num_inference_steps=int(50 * strength),
+                prompt,
                 guidance_scale=scale,
+                num_inference_steps=int(50 * strength),
+                max_sequence_length=256,
+                generator=torch.Generator("cuda").manual_seed(0)
             )
 
         generated_image = output.images[0]
