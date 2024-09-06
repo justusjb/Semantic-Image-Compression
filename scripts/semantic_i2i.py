@@ -24,6 +24,8 @@ from scripts.qam import qam16ModulationTensor, qam16ModulationString
 import time
 
 from SSIM_PIL import compare_ssim
+from diffusers import FluxPipeline
+
 
 '''
 
@@ -49,6 +51,11 @@ model_ckpt_path = "path/to/model-checkpoint" #"G:/Giordano/stablediffusion/check
 config_path     = "path/to/model-config"     #"G:/Giordano/stablediffusion/configs/stable-diffusion/v1-inference.yaml"
 
 
+def load_flux_model(model_path):
+    print(f"Loading FLUX model from {model_path}")
+    pipeline = FluxPipeline.from_pretrained(model_path, torch_dtype=torch.float16)
+    pipeline = pipeline.to("cuda")
+    return pipeline
 
 
 def load_model_from_config(config, ckpt, verbose=False):
@@ -83,146 +90,99 @@ def load_img(path):
     return 2. * image - 1.
 
 
-
-    
-
 def test(dataloader,
          snr=10,
          num_images=100,
          batch_size=1,
-         num_images_per_sample=2,
          outpath='',
          model=None,
          device=None,
-         sampler=None,
          strength=0.8,
-         ddim_steps=50,
          scale=9.0):
-    
     blip = pipeline("image-to-text", model="Salesforce/blip-image-captioning-large")
-    i=0
+    i = 0
 
-    sampling_steps = int(strength*50)
-    print(sampling_steps)
-    sampler.make_schedule(ddim_num_steps=50, ddim_eta=0.0, verbose=False) #attenzione ai parametri
-    sample_path = os.path.join(outpath, f"Test-samples-{snr}-{sampling_steps}")
+    sample_path = os.path.join(outpath, f"Test-samples-{snr}")
     os.makedirs(sample_path, exist_ok=True)
 
-    text_path = os.path.join(outpath, f"Test-text-samples-{snr}-{sampling_steps}")
+    text_path = os.path.join(outpath, f"Test-text-samples-{snr}")
     os.makedirs(text_path, exist_ok=True)
 
-    sample_orig_path = os.path.join(outpath, f"Test-samples-orig-{snr}-{sampling_steps}")
+    sample_orig_path = os.path.join(outpath, f"Test-samples-orig-{snr}")
     os.makedirs(sample_orig_path, exist_ok=True)
 
     lpips = lp.LPIPS(net='alex')
     lpips_values = []
-
     ssim_values = []
-
     time_values = []
 
-    tq = tqdm(dataloader,total=num_images)
+    tq = tqdm(dataloader, total=num_images)
     for batch in tq:
-
-        print(f"Processing batch: {batch}")
-
         img_file_path = batch[0]
 
-        #Open Image
-        init_image = Image.open(img_file_path)
+        # Open Image
+        init_image = Image.open(img_file_path).convert("RGB")
+        init_image = init_image.resize((512, 512), resample=PIL.Image.LANCZOS)
 
-        #Automatically extract caption using BLIP model
-        prompt = blip(init_image)[0]["generated_text"]  
-        prompt_original = prompt 
-        
+        # Automatically extract caption using BLIP model
+        prompt = blip(init_image)[0]["generated_text"]
+        prompt_original = prompt
+
         base_count = len(os.listdir(sample_path))
 
-        assert os.path.isfile(img_file_path)
-        init_image = load_img(img_file_path).to(device)
-        init_image = repeat(init_image, '1 ... -> b ...', b=batch_size)
-        init_latent = model.get_first_stage_encoding(model.encode_first_stage(init_image))  # move to latent space
-        
-        #print(init_latent.shape,init_latent.type())
-        
-        '''
-        CHANNEL SIMULATION
-        '''
+        # Apply channel simulation
+        init_image_tensor = torch.from_numpy(np.array(init_image)).permute(2, 0, 1).unsqueeze(0).float() / 127.5 - 1
+        init_image_tensor = qam16ModulationTensor(init_image_tensor.cpu(), snr_db=snr).to(device)
+        prompt = qam16ModulationString(prompt, snr_db=snr)
 
-        init_latent = qam16ModulationTensor(init_latent.cpu(),snr_db=snr).to(device)
+        start_time = time.time()
 
-        prompt = qam16ModulationString(prompt,snr_db=snr)  #NOISY BLIP PROMPT
-       
-        data = [batch_size * [prompt]]
-        assert 0. <= strength <= 1., 'can only work with strength in [0.0, 1.0]'
-        t_enc = int(strength * ddim_steps)
-        
-        precision_scope = autocast 
+        # Generate image with FLUX
         with torch.no_grad():
-            with precision_scope("cuda"):
-                with model.ema_scope():
-                    all_samples = list()
-                    for n in range(1):
-                        for prompts in data: 
-                            start_time = time.time()
-                            uc = None
-                            if scale != 1.0:
-                                uc = model.get_learned_conditioning(batch_size * [""])
-                            if isinstance(prompts, tuple):
-                                prompts = list(prompts)
-                            c = model.get_learned_conditioning(prompts)
-                            # encode (scaled latent)
-                            z_enc = sampler.stochastic_encode(init_latent, torch.tensor([t_enc] * batch_size).to(device))
-                            # z_enc = init_latent
-                            # decode it
-                            samples = sampler.decode(z_enc, c, t_enc, unconditional_guidance_scale=scale,
-                                                     unconditional_conditioning=uc, )
-                            x_samples = model.decode_first_stage(samples)
+            output = model(
+                prompt=prompt,
+                image=init_image_tensor,
+                num_inference_steps=int(50 * strength),
+                guidance_scale=scale,
+            )
 
-                            x_samples = torch.clamp((x_samples + 1.0) / 2.0, min=0.0, max=1.0)
+        generated_image = output.images[0]
 
-                            end_time = time.time()
-                            execution_time = end_time - start_time
+        end_time = time.time()
+        execution_time = end_time - start_time
+        time_values.append(execution_time)
 
-                            time_values.append(execution_time)
-    
-                            for x_sample in x_samples:
-                                x_sample = 255. * rearrange(x_sample.cpu().numpy(), 'c h w -> h w c')
-                                img = Image.fromarray(x_sample.astype(np.uint8))
-                                #SAVE IMAGE
-                                img.save(os.path.join(sample_path, f"{base_count:05}.png"))
-                                #SAVE TEXT
-                                f = open(os.path.join(text_path, f"{base_count:05}.txt"),"a")        
-                                f.write(prompt_original)
-                                f.close()
+        # Save generated image
+        generated_image.save(os.path.join(sample_path, f"{base_count:05}.png"))
 
-                                #SAVE ORIGINAL IMAGE
-                                init_image_copy = Image.open(img_file_path)
-                                init_image_copy = init_image_copy.resize((512, 512), resample=PIL.Image.LANCZOS)
-                                init_image_copy.save(os.path.join(sample_orig_path, f"{base_count:05}.png"))
+        # Save text
+        with open(os.path.join(text_path, f"{base_count:05}.txt"), "w") as f:
+            f.write(prompt_original)
 
-                                # Compute SSIM
-                                ssim_values.append(compare_ssim(init_image_copy, img))
-                                base_count += 1
-                            all_samples.append(x_samples)
-                    
-                    #Compute LPIPS
-                    sample_out = (all_samples[0][0] * 2) - 1 
-                    lp_score=lpips(init_image[0].cpu(),sample_out.cpu()).item()
-                    
-                    tq.set_postfix(lpips=lp_score)
-                    
-                    if not np.isnan(lp_score):
-                        lpips_values.append(lp_score)
+        # Save original image
+        init_image.save(os.path.join(sample_orig_path, f"{base_count:05}.png"))
 
+        # Compute SSIM
+        ssim_values.append(compare_ssim(init_image, generated_image))
 
-        i+=1
-        if i== num_images:
+        # Compute LPIPS
+        init_image_tensor = torch.from_numpy(np.array(init_image)).permute(2, 0, 1).unsqueeze(0).float() / 127.5 - 1
+        generated_image_tensor = torch.from_numpy(np.array(generated_image)).permute(2, 0, 1).unsqueeze(
+            0).float() / 127.5 - 1
+        lp_score = lpips(init_image_tensor.to(device), generated_image_tensor.to(device)).item()
+
+        tq.set_postfix(lpips=lp_score)
+
+        if not np.isnan(lp_score):
+            lpips_values.append(lp_score)
+
+        i += 1
+        if i == num_images:
             break
 
-
-    print(f'mean lpips score at snr={snr} : {sum(lpips_values)/len(lpips_values)}')
-    print(f'mean ssim score at snr={snr} : {sum(ssim_values)/len(ssim_values)}')
-    print(f'mean time with sampling iterations {sampling_steps} : {sum(time_values)/len(time_values)}')
+    print(f'mean lpips score at snr={snr} : {sum(lpips_values) / len(lpips_values)}')
+    print(f'mean ssim score at snr={snr} : {sum(ssim_values) / len(ssim_values)}')
+    print(f'mean time with sampling iterations {int(50 * strength)} : {sum(time_values) / len(time_values)}')
     return 1
 
 
@@ -251,32 +211,21 @@ if __name__ == "__main__":
     seed_everything(opt.seed)
 
     config = OmegaConf.load(f"{config_path}")
-    model = load_model_from_config(config, f"{model_ckpt_path}")
+    #model = load_model_from_config(config, f"{model_ckpt_path}")
+    model = load_flux_model(f"{model_ckpt_path}")  # or "stabilityai/flux" if using the pre-trained model
 
     device = torch.device("cuda") if torch.cuda.is_available() else torch.device("cpu")
     model = model.to(device)
 
-    sampler = DDIMSampler(model)
-
     os.makedirs(opt.outdir, exist_ok=True)
     outpath = opt.outdir
 
-    #INIZIO TEST
+    # INIZIO TEST
+    for snr in [10, 8.75, 7.50, 6.25, 5]:
+        test(test_dataloader, snr=snr, num_images=100, batch_size=1, outpath=outpath,
+             model=model, device=device, strength=0.6, scale=9)
 
     #Strength is used to modulate the number of sampling steps. Steps=50*strength 
-    test(test_dataloader,snr=10,num_images=100,batch_size=1,num_images_per_sample=1,outpath=outpath,
-         model=model,device=device,sampler=sampler,strength=0.6,scale=9)
-    
-    test(test_dataloader,snr=8.75,num_images=100,batch_size=1,num_images_per_sample=1,outpath=outpath,
-         model=model,device=device,sampler=sampler,strength=0.6,scale=9)
-    
-    test(test_dataloader,snr=7.50,num_images=100,batch_size=1,num_images_per_sample=1,outpath=outpath,
-         model=model,device=device,sampler=sampler,strength=0.6,scale=9)
-    
-    test(test_dataloader,snr=6.25,num_images=100,batch_size=1,num_images_per_sample=1,outpath=outpath,
-         model=model,device=device,sampler=sampler,strength=0.6,scale=9)
-    
-    test(test_dataloader,snr=5,num_images=100,batch_size=1,num_images_per_sample=1,outpath=outpath,
-         model=model,device=device,sampler=sampler,strength=0.6,scale=9)
+
     
     
