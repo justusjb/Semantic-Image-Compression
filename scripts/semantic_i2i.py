@@ -118,7 +118,7 @@ def test(dataloader,
     sample_orig_path = os.path.join(outpath, f"Test-samples-orig-{snr}")
     os.makedirs(sample_orig_path, exist_ok=True)
 
-    lpips = lp.LPIPS(net='alex')
+    lpips = lp.LPIPS(net='alex').to(device)  # Move LPIPS to the specified device
     lpips_values = []
     ssim_values = []
     time_values = []
@@ -182,7 +182,14 @@ def test(dataloader,
         init_image_tensor = torch.from_numpy(np.array(init_image)).permute(2, 0, 1).unsqueeze(0).float() / 127.5 - 1
         generated_image_tensor = torch.from_numpy(np.array(generated_image)).permute(2, 0, 1).unsqueeze(
             0).float() / 127.5 - 1
-        lp_score = lpips(init_image_tensor.to(device), generated_image_tensor.to(device)).item()
+
+        init_image_tensor = init_image_tensor.to(device)
+        generated_image_tensor = generated_image_tensor.to(device)
+
+        with torch.no_grad():  # Add this to prevent unnecessary gradient computation
+            lp_score = lpips(init_image_tensor, generated_image_tensor).item()
+
+        #lp_score = lpips(init_image_tensor.to(device), generated_image_tensor.to(device)).item()
 
         tq.set_postfix(lpips=lp_score)
 
@@ -224,10 +231,11 @@ if __name__ == "__main__":
 
     config = OmegaConf.load(f"{config_path}")
     #model = load_model_from_config(config, f"{model_ckpt_path}")
-    model = load_flux_model(f"{model_ckpt_path}")  # or "stabilityai/flux" if using the pre-trained model
+    #model = load_flux_model(f"{model_ckpt_path}")  # or "stabilityai/flux" if using the pre-trained model
 
-    #device = torch.device("cuda") if torch.cuda.is_available() else torch.device("cpu")
+    device = torch.device("cuda") #if torch.cuda.is_available() else torch.device("cpu")
     #model = model.to(device)
+    model = load_flux_model("LELELEL")
 
     os.makedirs(opt.outdir, exist_ok=True)
     outpath = opt.outdir
