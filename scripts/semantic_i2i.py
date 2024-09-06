@@ -52,8 +52,8 @@ config_path     = "path/to/model-config"     #"G:/Giordano/stablediffusion/confi
 
 
 def load_flux_model(model_path):
-    print(f"Loading FLUX model from {model_path}")
-    pipeline = FluxPipeline.from_pretrained(model_path, torch_dtype=torch.float16)
+    print(f"Loading FLUX model from not {model_path}")
+    pipeline = FluxPipeline.from_pretrained("black-forest-labs/FLUX.1-schnell", torch_dtype=torch.float16)
     pipeline = pipeline.to("cuda")
     return pipeline
 
