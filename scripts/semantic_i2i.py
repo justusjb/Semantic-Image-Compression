@@ -60,7 +60,7 @@ def load_flux_model(model_path):
     except Exception as e:
         print(f"Error loading FLUX model: {e}")
         print("Attempting to load from 'black-forest-labs/FLUX.1-schnell'...")
-        pipeline = FluxPipeline.from_pretrained("black-forest-labs/FLUX.1-schnell", torch_dtype=torch.float16)
+        pipeline = FluxPipeline.from_pretrained("black-forest-labs/FLUX.1-schnell", torch_dtype=torch.bfloat16)
         pipeline.enable_model_cpu_offload()
         return pipeline
 
@@ -149,10 +149,13 @@ def test(dataloader,
                 guidance_scale=scale,
                 num_inference_steps=int(50 * strength),
                 max_sequence_length=256,
-                generator=torch.Generator("cuda").manual_seed(0)
+                generator=torch.Generator("cpu").manual_seed(0)
             )
 
         generated_image = output.images[0]
+
+        # Ensure generated image has the same size as the original
+        generated_image = generated_image.resize((512, 512), resample=PIL.Image.LANCZOS)
 
         end_time = time.time()
         execution_time = end_time - start_time
@@ -169,7 +172,11 @@ def test(dataloader,
         init_image.save(os.path.join(sample_orig_path, f"{base_count:05}.png"))
 
         # Compute SSIM
-        ssim_values.append(compare_ssim(init_image, generated_image))
+        try:
+            ssim_value = compare_ssim(init_image, generated_image)
+            ssim_values.append(ssim_value)
+        except AttributeError:
+            print(f"SSIM comparison failed for image {base_count}. Skipping.")
 
         # Compute LPIPS
         init_image_tensor = torch.from_numpy(np.array(init_image)).permute(2, 0, 1).unsqueeze(0).float() / 127.5 - 1
@@ -190,7 +197,6 @@ def test(dataloader,
     print(f'mean ssim score at snr={snr} : {sum(ssim_values) / len(ssim_values)}')
     print(f'mean time with sampling iterations {int(50 * strength)} : {sum(time_values) / len(time_values)}')
     return 1
-
 
 
 if __name__ == "__main__":
@@ -220,8 +226,8 @@ if __name__ == "__main__":
     #model = load_model_from_config(config, f"{model_ckpt_path}")
     model = load_flux_model(f"{model_ckpt_path}")  # or "stabilityai/flux" if using the pre-trained model
 
-    device = torch.device("cuda") if torch.cuda.is_available() else torch.device("cpu")
-    model = model.to(device)
+    #device = torch.device("cuda") if torch.cuda.is_available() else torch.device("cpu")
+    #model = model.to(device)
 
     os.makedirs(opt.outdir, exist_ok=True)
     outpath = opt.outdir
@@ -229,7 +235,7 @@ if __name__ == "__main__":
     # INIZIO TEST
     for snr in [10, 8.75, 7.50, 6.25, 5]:
         test(test_dataloader, snr=snr, num_images=100, batch_size=1, outpath=outpath,
-             model=model, device=device, strength=0.6, scale=9)
+             model=model, device="cuda", strength=0.6, scale=9)
 
     #Strength is used to modulate the number of sampling steps. Steps=50*strength 
 
