@@ -1,5 +1,3 @@
-torch
-torchvision
 invisible-watermark
 albumentations==0.4.3
 opencv-python
@@ -24,6 +22,5 @@ diffusers
 bitstring
 lpips
 kaggle
-accelerate
 SSIM-PIL
 huggingface_hub
